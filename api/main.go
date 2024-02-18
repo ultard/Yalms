@@ -21,9 +21,10 @@ type Operation struct {
 }
 
 type Expression struct {
-	ID         uint   `gorm:"primaryKey"`
-	Expression string `gorm:"not null"`
-	Status     string `gorm:"default:'Pending'"`
+	ID         uint     `gorm:"primaryKey"`
+	Expression string   `gorm:"not null"`
+	Status     string   `gorm:"default:'Pending'"`
+	tokens     []string `gorm:"default:[]"`
 	Result     *int
 
 	CreatedAt   time.Time
@@ -32,10 +33,8 @@ type Expression struct {
 }
 
 type Task struct {
-	ID          uint   `gorm:"primaryKey"`
-	first       int    `gorm:"not null"`
-	second      int    `gorm:"not null"`
-	operator    string `gorm:"not null"`
+	ID          uint `gorm:"primaryKey"`
+	tokens      int
 	Result      *int
 	CreatedAt   time.Time
 	CompletedAt *time.Time
@@ -63,6 +62,8 @@ func main() {
 		log.Fatalf("Error migrating the database: %v", err)
 	}
 
+	go checkExpressions()
+
 	// Initialize Gin router
 	router := gin.Default()
 
@@ -85,6 +86,28 @@ func main() {
 	if err != nil {
 		return
 	}
+
+}
+
+func checkExpressions() {
+	for {
+		var expressions []Expression
+		if err := db.Where("status = ?", "In progress").Find(&expressions).Error; err != nil {
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		for _, expression := range expressions {
+			if expression.ProcessAt != nil && time.Since(*expression.ProcessAt) < 20*time.Minute {
+				continue
+			}
+
+			expression.Status = "Pending"
+			expression.ProcessAt = nil
+		}
+
+		time.Sleep(1 * time.Minute)
+	}
 }
 
 func addExpression(c *gin.Context) {
@@ -94,6 +117,7 @@ func addExpression(c *gin.Context) {
 		return
 	}
 
+	expression.tokens = splitExpression(expression.Expression)
 	if err := db.Create(&expression).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
