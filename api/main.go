@@ -152,14 +152,27 @@ func listOperations(c *gin.Context) {
 }
 
 func setOperations(c *gin.Context) {
-	var operation Operation
-	if err := c.BindJSON(&operation); err != nil {
+	var data Operation
+	if err := c.BindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	db.Update("ExecutionTime", operation.ExecutionTime)
-	c.JSON(http.StatusOK, operation)
+	var operation Operation
+	if err := db.Where("name = ?", data.Name).First(&operation).Error; err != nil {
+		if err := db.Create(&data).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusCreated, operation)
+		return
+	}
+
+	operation.ExecutionTime = data.ExecutionTime
+	db.Save(&operation)
+
+	c.JSON(http.StatusCreated, operation)
 }
 
 func getTask(c *gin.Context) {
