@@ -48,7 +48,20 @@ func init() {
 	}
 }
 
+func checkDatabase() {
+	databaseURL := fmt.Sprintf("postgres://%s:%s@%s?sslmode=disable",
+		os.Getenv("POSTGRES_USER"), os.Getenv("POSTGRES_PASSWORD"), os.Getenv("POSTGRES_HOST"))
+	database, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Error connecting to database: %v", err)
+	}
+
+	_ = database.Exec(fmt.Sprintf("CREATE DATABASE %s;", os.Getenv("POSTGRES_DB")))
+}
+
 func main() {
+	checkDatabase()
+
 	var err error
 	databaseURL := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
 		os.Getenv("POSTGRES_USER"), os.Getenv("POSTGRES_PASSWORD"), os.Getenv("POSTGRES_HOST"), os.Getenv("POSTGRES_DB"))
