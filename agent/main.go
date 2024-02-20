@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 type Task struct {
@@ -27,12 +27,6 @@ type Result struct {
 }
 
 func main() {
-	// Load environment variables
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
-
 	// Initialize number of workers
 	numWorkers, err := strconv.Atoi(os.Getenv("NUM_WORKERS"))
 	if err != nil {
@@ -50,10 +44,10 @@ func main() {
 
 	// Consume tasks from the server
 	for {
-		time.Sleep(2 * time.Second)
+		time.Sleep(4 * time.Second)
 
 		task, err := getTask()
-		if err != nil {
+		if !err {
 			continue
 		}
 		tasks <- task
@@ -76,34 +70,39 @@ func worker(tasks <-chan Task, wg *sync.WaitGroup, id int) {
 	}
 }
 
-func getTask() (Task, error) {
-	resp, err := http.Get("http://localhost:8080/task")
+func getTask() (Task, bool) {
+	fmt.Println("Trying to get tasks from api")
+	resp, err := http.Get(os.Getenv("API_URL") + "/task")
 	if err != nil {
-		return Task{}, err
+		return Task{}, false
 	}
+
 	defer resp.Body.Close()
+	if resp.Status != "200" {
+		return Task{}, false
+	}
 
 	var task Task
 	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
-		return Task{}, err
+		fmt.Println("Failed to decode task")
+		return Task{}, false
 	}
 
-	return task, nil
+	fmt.Println(resp.Body)
+	return task, true
 }
 
-func sendTask(result Result) Task {
-	resp, err := http.Get("http://localhost:8080/result")
+func sendTask(result Result) {
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	resp, err := http.Post(os.Getenv("API_URL")+"/result", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer resp.Body.Close()
-
-	var task Task
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
-		log.Fatal(err)
-	}
-
-	return task
 }
 
 func computeExpression(tokens []string) (int, bool) {

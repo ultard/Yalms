@@ -1,20 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 type Operation struct {
-	gorm.Model
 	ID            uint   `gorm:"primaryKey"`
 	Name          string `gorm:"not null"`
 	ExecutionTime int    `gorm:"not null"`
@@ -24,7 +21,7 @@ type Expression struct {
 	ID         uint     `gorm:"primaryKey"`
 	Expression string   `gorm:"not null"`
 	Status     string   `gorm:"default:'Pending'"`
-	tokens     []string `gorm:"default:[]"`
+	tokens     []string `gorm:"type:text[]"`
 	Result     *int
 
 	CreatedAt   time.Time
@@ -33,49 +30,29 @@ type Expression struct {
 }
 
 type Task struct {
-	ID          uint `gorm:"primaryKey"`
-	tokens      int
-	Result      *int
-	CreatedAt   time.Time
-	CompletedAt *time.Time
+	ID      int `json:"id"`
+	tokens  []string
+	waitFor int
+	Result  int `json:"result"`
 }
 
 var db *gorm.DB
 
-func init() {
-	if err := godotenv.Load(); err != nil {
-		log.Printf("Cannot load .env file: %v", err)
-	}
-}
-
-func checkDatabase() {
-	databaseURL := fmt.Sprintf("postgres://%s:%s@%s?sslmode=disable",
-		os.Getenv("POSTGRES_USER"), os.Getenv("POSTGRES_PASSWORD"), os.Getenv("POSTGRES_HOST"))
-	database, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("Error connecting to database: %v", err)
-	}
-
-	_ = database.Exec(fmt.Sprintf("CREATE DATABASE %s;", os.Getenv("POSTGRES_DB")))
-}
-
 func main() {
-	checkDatabase()
-
 	var err error
-	databaseURL := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
-		os.Getenv("POSTGRES_USER"), os.Getenv("POSTGRES_PASSWORD"), os.Getenv("POSTGRES_HOST"), os.Getenv("POSTGRES_DB"))
+	databaseURL := os.Getenv("POSTGRES_URL")
 	db, err = gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Error connecting to database: %v", err)
 	}
 
-	err = db.AutoMigrate(&Expression{}, &Operation{}, &Task{})
+	err = db.AutoMigrate(&Expression{}, &Operation{})
 	if err != nil {
 		log.Fatalf("Error migrating the database: %v", err)
 	}
 
 	go checkExpressions()
+	go checkOperations()
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -120,6 +97,20 @@ func checkExpressions() {
 		}
 
 		time.Sleep(1 * time.Minute)
+	}
+}
+
+func checkOperations() {
+	for _, operationName := range []string{"+", "-", "*", "/"} {
+		var operation Operation
+		if err := db.Where("name = ?", operationName).First(&operation).Error; err == nil {
+			continue
+		}
+
+		operation = Operation{ID: 0, Name: operationName, ExecutionTime: 1000}
+		if err := db.Create(&operation).Error; err != nil {
+			log.Fatalf("Не удалось создать операции")
+		}
 	}
 }
 
@@ -173,18 +164,13 @@ func setOperations(c *gin.Context) {
 
 	var operation Operation
 	if err := db.Where("name = ?", data.Name).First(&operation).Error; err != nil {
-		if err := db.Create(&data).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(http.StatusCreated, operation)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	operation.ExecutionTime = data.ExecutionTime
-	db.Save(&operation)
 
+	db.Save(&operation)
 	c.JSON(http.StatusCreated, operation)
 }
 
@@ -200,7 +186,7 @@ func getTask(c *gin.Context) {
 	expression.ProcessAt = &startedAt
 	db.Save(&expression)
 
-	c.JSON(http.StatusOK, expression)
+	c.JSON(http.StatusOK, Task{tokens: expression.tokens[:3]})
 }
 
 func receiveResult(c *gin.Context) {

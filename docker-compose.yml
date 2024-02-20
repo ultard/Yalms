@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  api:
+    container_name: 'yalms-api'
+    depends_on:
+      - db
+    networks:
+      - yalms-network
+    build:
+      context: ./api
+      target: prod
+    ports:
+      - "8080:8080"
+    environment:
+      POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+
+  agent:
+    container_name: 'yalms-agent'
+    depends_on:
+      - db
+    networks:
+      - yalms-network
+    build:
+      context: ./agent
+      target: prod
+    environment:
+      API_URL: http://api:8080
+      NUM_WORKERS: ${NUM_WORKERS}
+
+  db:
+    container_name: 'yalms-database'
+    image: postgres:16.1-alpine3.19
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "54321:5432"
+    networks:
+      - yalms-network
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+volumes:
+  postgres:
+    name: postgres
+
+networks:
+  yalms-network:
