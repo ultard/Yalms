@@ -129,14 +129,14 @@ func splitExpression(expression string) ([]string, error) {
 func tokenizer(tokens []string, result *int) ([]string, []string) {
 	var first, stack []string
 
-	for _, token := range tokens {
+	for i, token := range tokens {
 		switch token {
 		case "+", "-", "*", "/":
 			stack = append(stack, token)
 
 			if len(first) == 0 {
-				first = stack[len(stack)-3:]
-				stack = stack[:len(stack)-3]
+				first = stack[i-2:]
+				stack = append([]string{}, stack[:i-2]...)
 
 				if result != nil {
 					stack = append([]string{strconv.Itoa(*result)}, stack...)

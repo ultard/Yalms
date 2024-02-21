@@ -50,11 +50,10 @@ func main() {
 func tasker(tasks chan<- Task) {
 	for {
 		time.Sleep(4 * time.Second)
-		//fmt.Println("Trying to get tasks from api")
+		fmt.Println("Trying to get tasks from api")
 
 		resp, err := http.Get(os.Getenv("API_URL") + "/task")
 		if err != nil {
-			fmt.Println(err)
 			continue
 		}
 
@@ -86,7 +85,7 @@ func sender(answers chan Result) {
 		}
 
 		resp, err := http.Post(os.Getenv("API_URL")+"/result", "application/json", bytes.NewBuffer(jsonData))
-		if err != nil {
+		if err != nil || resp.StatusCode == http.StatusBadRequest {
 			answers <- answer
 			continue
 		}
@@ -98,7 +97,6 @@ func sender(answers chan Result) {
 func worker(tasks <-chan Task, answers chan Result, wg *sync.WaitGroup, id int) {
 	defer wg.Done()
 	for task := range tasks {
-		fmt.Println(task)
 		time.Sleep(time.Duration(task.WaitFor) * time.Millisecond)
 		result, ok := computeExpression(task.Tokens)
 		if !ok {

@@ -126,8 +126,9 @@ func addExpression(c *gin.Context) {
 
 	var err error
 	expression.Tokens, err = splitExpression(expression.Expression)
-	if err != nil {
+	if err != nil || expression.Expression == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Выражение невалидно"})
+		return
 	}
 
 	if err := db.Create(&expression).Error; err != nil {
@@ -147,8 +148,17 @@ func listExpressions(c *gin.Context) {
 
 func getExpressionByID(c *gin.Context) {
 	id := c.Param("id")
+
+	// Convert the ID parameter to UUID type
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID"})
+		return
+	}
+
 	var expression Expression
-	if err := db.First(&expression, id).Error; err != nil {
+	// Use the UUID variable instead of the id parameter
+	if err := db.First(&expression, "id = ?", uid).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Expression not found"})
 		return
 	}
@@ -192,6 +202,11 @@ func getTask(c *gin.Context) {
 	var tokens []string
 	tokens, _ = tokenizer(expression.Tokens, nil)
 
+	if len(tokens) < 3 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Operator not found"})
+		return
+	}
+
 	var operation Operation
 	if err := db.Where("name = ?", tokens[2]).First(&operation).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Operator not found"})
@@ -208,9 +223,9 @@ func getTask(c *gin.Context) {
 
 func receiveResult(c *gin.Context) {
 	var data struct {
-		ID          int `json:"id"`
-		WorkerID    int `json:"workerID"`
-		Result      int `json:"result"`
+		ID          string `json:"id"`
+		WorkerID    int    `json:"workerID"`
+		Result      int    `json:"result"`
 		CompletedAt time.Time
 	}
 
@@ -219,17 +234,28 @@ func receiveResult(c *gin.Context) {
 		return
 	}
 
+	// Convert the ID parameter to UUID type
+	uid, err := uuid.Parse(data.ID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid UUID"})
+		return
+	}
+
 	var expression Expression
-	if err := db.First(&expression, data.ID).Error; err != nil {
+	// Use the UUID variable instead of the id parameter
+	if err := db.First(&expression, "id = ?", uid).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Expression not found"})
 		return
 	}
 
+	c.JSON(http.StatusOK, expression)
+
 	_, expression.Tokens = tokenizer(expression.Tokens, &data.Result)
 
-	if len(expression.Tokens) == 0 {
+	if len(expression.Tokens) < 2 {
 		expression.Status = "Completed"
 		expression.Result = &data.Result
+		expression.Tokens = nil
 	} else {
 		expression.Status = "Pending"
 	}
