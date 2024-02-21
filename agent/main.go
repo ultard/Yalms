@@ -68,7 +68,6 @@ func tasker(tasks chan<- Task) {
 			continue
 		}
 
-		fmt.Println(task)
 		tasks <- task
 	}
 }
@@ -103,6 +102,7 @@ func worker(tasks <-chan Task, answers chan Result, wg *sync.WaitGroup, id int) 
 			continue
 		}
 
+		fmt.Println(fmt.Sprintf("Worker %d: result %s", id, result))
 		res := Result{ID: task.ID, Result: result, WorkerID: id, CompletedAt: time.Now()}
 		answers <- res
 	}
