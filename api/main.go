@@ -203,7 +203,7 @@ func getTask(c *gin.Context) {
 	expression.ProcessAt = &startedAt
 	db.Save(&expression)
 
-	c.JSON(http.StatusOK, Task{ID: expression.ID, tokens: tokens, waitFor: operation.ExecutionTime})
+	c.JSON(http.StatusOK, Task{ID: expression.ID, Tokens: tokens, WaitFor: operation.ExecutionTime})
 }
 
 func receiveResult(c *gin.Context) {
