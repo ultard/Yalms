@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,16 +12,15 @@ import (
 )
 
 type Task struct {
-	ID      int `json:"id"`
-	tokens  []string
-	waitFor int
-	Result  int `json:"result"`
+	ID      string   `json:"id"`
+	Tokens  []string `json:"tokens"`
+	WaitFor int      `json:"waitfor"`
 }
 
 type Result struct {
-	ID          int `json:"id"`
-	WorkerID    int `json:"workerID"`
-	Result      int `json:"result"`
+	ID          string `json:"id"`
+	WorkerID    int    `json:"workerID"`
+	Result      int    `json:"result"`
 	CompletedAt time.Time
 }
 
@@ -34,75 +32,82 @@ func main() {
 	}
 
 	tasks := make(chan Task)
+	answers := make(chan Result)
 
 	// Start workers
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go worker(tasks, &wg, i)
+		go worker(tasks, answers, &wg, i)
 	}
 
-	// Consume tasks from the server
-	for {
-		time.Sleep(4 * time.Second)
+	go tasker(tasks)
+	go sender(answers)
 
-		task, err := getTask()
-		if !err {
-			continue
-		}
-		tasks <- task
-	}
-
-	// Wait for all workers to finish
 	wg.Wait()
 }
 
-func worker(tasks <-chan Task, wg *sync.WaitGroup, id int) {
+func tasker(tasks chan<- Task) {
+	for {
+		time.Sleep(4 * time.Second)
+		//fmt.Println("Trying to get tasks from api")
+
+		resp, err := http.Get(os.Getenv("API_URL") + "/task")
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		var task Task
+		if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+			fmt.Println("Failed to decode task")
+			continue
+		}
+
+		fmt.Println(task)
+		tasks <- task
+	}
+}
+
+func sender(answers chan Result) {
+	for answer := range answers {
+		time.Sleep(4 * time.Second)
+		fmt.Println("Trying to send task to api")
+
+		jsonData, err := json.Marshal(answer)
+		if err != nil {
+			answers <- answer
+			continue
+		}
+
+		resp, err := http.Post(os.Getenv("API_URL")+"/result", "application/json", bytes.NewBuffer(jsonData))
+		if err != nil {
+			answers <- answer
+			continue
+		}
+
+		defer resp.Body.Close()
+	}
+}
+
+func worker(tasks <-chan Task, answers chan Result, wg *sync.WaitGroup, id int) {
 	defer wg.Done()
 	for task := range tasks {
-		// Perform computation
-		result, ok := computeExpression(task.tokens)
+		fmt.Println(task)
+		time.Sleep(time.Duration(task.WaitFor) * time.Millisecond)
+		result, ok := computeExpression(task.Tokens)
 		if !ok {
 			continue
 		}
 
-		sendTask(Result{ID: task.ID, Result: result, WorkerID: id})
+		res := Result{ID: task.ID, Result: result, WorkerID: id, CompletedAt: time.Now()}
+		answers <- res
 	}
-}
-
-func getTask() (Task, bool) {
-	fmt.Println("Trying to get tasks from api")
-	resp, err := http.Get(os.Getenv("API_URL") + "/task")
-	if err != nil {
-		return Task{}, false
-	}
-
-	defer resp.Body.Close()
-	if resp.Status != "200" {
-		return Task{}, false
-	}
-
-	var task Task
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
-		fmt.Println("Failed to decode task")
-		return Task{}, false
-	}
-
-	fmt.Println(resp.Body)
-	return task, true
-}
-
-func sendTask(result Result) {
-	jsonData, err := json.Marshal(result)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	resp, err := http.Post(os.Getenv("API_URL")+"/result", "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
 }
 
 func computeExpression(tokens []string) (int, bool) {

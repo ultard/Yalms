@@ -1,12 +1,14 @@
 package main
 
 import (
+	"github.com/lib/pq"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -18,10 +20,10 @@ type Operation struct {
 }
 
 type Expression struct {
-	ID         uint     `gorm:"primaryKey"`
-	Expression string   `gorm:"not null"`
-	Status     string   `gorm:"default:'Pending'"`
-	tokens     []string `gorm:"type:text[]"`
+	ID         uuid.UUID      `gorm:"type:uuid;default:uuid_generate_v4()"`
+	Expression string         `gorm:"not null"`
+	Status     string         `gorm:"default:'Pending'"`
+	Tokens     pq.StringArray `gorm:"type:text[]"`
 	Result     *int
 
 	CreatedAt   time.Time
@@ -30,10 +32,9 @@ type Expression struct {
 }
 
 type Task struct {
-	ID      int `json:"id"`
-	tokens  []string
-	waitFor int
-	Result  int `json:"result"`
+	ID      uuid.UUID `json:"id"`
+	Tokens  []string  `json:"tokens"`
+	WaitFor int       `json:"waitfor"`
 }
 
 var db *gorm.DB
@@ -46,6 +47,7 @@ func main() {
 		log.Fatalf("Error connecting to database: %v", err)
 	}
 
+	db.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 	err = db.AutoMigrate(&Expression{}, &Operation{})
 	if err != nil {
 		log.Fatalf("Error migrating the database: %v", err)
@@ -88,12 +90,13 @@ func checkExpressions() {
 		}
 
 		for _, expression := range expressions {
-			if expression.ProcessAt != nil && time.Since(*expression.ProcessAt) < 20*time.Minute {
+			if expression.ProcessAt == nil || time.Since(*expression.ProcessAt) < 20*time.Minute {
 				continue
 			}
 
 			expression.Status = "Pending"
 			expression.ProcessAt = nil
+			db.Save(&expression)
 		}
 
 		time.Sleep(1 * time.Minute)
@@ -121,7 +124,12 @@ func addExpression(c *gin.Context) {
 		return
 	}
 
-	expression.tokens = splitExpression(expression.Expression)
+	var err error
+	expression.Tokens, err = splitExpression(expression.Expression)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Выражение невалидно"})
+	}
+
 	if err := db.Create(&expression).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -164,7 +172,7 @@ func setOperations(c *gin.Context) {
 
 	var operation Operation
 	if err := db.Where("name = ?", data.Name).First(&operation).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Operator not found"})
 		return
 	}
 
@@ -181,19 +189,31 @@ func getTask(c *gin.Context) {
 		return
 	}
 
+	var tokens []string
+	tokens, _ = tokenizer(expression.Tokens, nil)
+
+	var operation Operation
+	if err := db.Where("name = ?", tokens[2]).First(&operation).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Operator not found"})
+		return
+	}
+
 	startedAt := time.Now()
 	expression.Status = "In progress"
 	expression.ProcessAt = &startedAt
 	db.Save(&expression)
 
-	c.JSON(http.StatusOK, Task{tokens: expression.tokens[:3]})
+	c.JSON(http.StatusOK, Task{ID: expression.ID, tokens: tokens, waitFor: operation.ExecutionTime})
 }
 
 func receiveResult(c *gin.Context) {
 	var data struct {
-		ID     uint `json:"id"`
-		Result int  `json:"result"`
+		ID          int `json:"id"`
+		WorkerID    int `json:"workerID"`
+		Result      int `json:"result"`
+		CompletedAt time.Time
 	}
+
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -205,8 +225,15 @@ func receiveResult(c *gin.Context) {
 		return
 	}
 
-	expression.Result = &data.Result
-	expression.Status = "Completed"
+	_, expression.Tokens = tokenizer(expression.Tokens, &data.Result)
+
+	if len(expression.Tokens) == 0 {
+		expression.Status = "Completed"
+		expression.Result = &data.Result
+	} else {
+		expression.Status = "Pending"
+	}
+
 	db.Save(&expression)
 	c.JSON(http.StatusOK, gin.H{"message": "Result received"})
 }
