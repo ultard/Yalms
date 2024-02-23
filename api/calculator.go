@@ -84,6 +84,11 @@ func isValidExpression(expression string) bool {
 			}
 		}
 
+		// Проверка на деление на ноль
+		if previousChar == '/' && char == '0' {
+			return false
+		}
+
 		if char != ' ' {
 			previousChar = char
 		}
