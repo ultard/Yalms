@@ -14,10 +14,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      POSTGRES_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      POSTGRES_URL: postgres://postgres:1234@db:5432/yalms?sslmode=disable
 
   agent:
-    container_name: 'yalms-agent'
+    deploy:
+      replicas: 2
     depends_on:
       - api
     networks:
@@ -27,15 +28,15 @@ services:
       target: prod
     environment:
       API_URL: http://api:8080
-      NUM_WORKERS: ${NUM_WORKERS}
+      NUM_WORKERS: 10
 
   db:
     container_name: 'yalms-database'
     image: postgres:16.1-alpine3.19
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: yalms
+      POSTGRES_PASSWORD: 1234
     ports:
       - "54321:5432"
     networks:

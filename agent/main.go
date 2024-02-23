@@ -18,9 +18,9 @@ type Task struct {
 }
 
 type Result struct {
-	ID          string `json:"id"`
-	WorkerID    int    `json:"workerID"`
-	Result      int    `json:"result"`
+	ID          string  `json:"id"`
+	WorkerID    int     `json:"workerID"`
+	Result      float64 `json:"result"`
 	CompletedAt time.Time
 }
 
@@ -48,27 +48,37 @@ func main() {
 }
 
 func tasker(tasks chan<- Task) {
+	waitTime, err := strconv.Atoi(os.Getenv("WAIT_REQUEST"))
+	if err != nil {
+		waitTime = 5 // Default to 5 workers
+	}
+
+	ticker := time.NewTicker(time.Duration(waitTime) * time.Second)
+	defer ticker.Stop()
+
 	for {
-		time.Sleep(4 * time.Second)
-		fmt.Println("Trying to get tasks from api")
+		select {
+		case <-ticker.C:
+			fmt.Println("Trying to get tasks from api")
 
-		resp, err := http.Get(os.Getenv("API_URL") + "/task")
-		if err != nil {
-			continue
+			resp, err := http.Get(os.Getenv("API_URL") + "/task")
+			if err != nil {
+				continue
+			}
+
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				continue
+			}
+
+			var task Task
+			if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+				fmt.Println("Failed to decode task")
+				continue
+			}
+
+			tasks <- task
 		}
-
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			continue
-		}
-
-		var task Task
-		if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
-			fmt.Println("Failed to decode task")
-			continue
-		}
-
-		tasks <- task
 	}
 }
 
@@ -102,14 +112,14 @@ func worker(tasks <-chan Task, answers chan Result, wg *sync.WaitGroup, id int) 
 			continue
 		}
 
-		fmt.Println(fmt.Sprintf("Worker %d: result %s", id, result))
+		fmt.Println(fmt.Sprintf("Worker %d: result %d", id, result))
 		res := Result{ID: task.ID, Result: result, WorkerID: id, CompletedAt: time.Now()}
 		answers <- res
 	}
 }
 
-func computeExpression(tokens []string) (int, bool) {
-	var stack []int
+func computeExpression(tokens []string) (float64, bool) {
+	var stack []float64
 
 	for _, token := range tokens {
 		switch token {
@@ -132,7 +142,7 @@ func computeExpression(tokens []string) (int, bool) {
 				stack = append(stack, operand1/operand2)
 			}
 		default:
-			num, _ := strconv.Atoi(token)
+			num, _ := strconv.ParseFloat(token, 32)
 			stack = append(stack, num)
 		}
 	}

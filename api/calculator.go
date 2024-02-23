@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"unicode"
 )
 
@@ -126,7 +125,7 @@ func splitExpression(expression string) ([]string, error) {
 	return tokens, nil
 }
 
-func tokenizer(tokens []string, result *int) ([]string, []string) {
+func tokenizer(tokens []string, result *float64) ([]string, []string) {
 	var first, stack []string
 
 	for i, token := range tokens {
@@ -139,7 +138,7 @@ func tokenizer(tokens []string, result *int) ([]string, []string) {
 				stack = append([]string{}, stack[:i-2]...)
 
 				if result != nil {
-					stack = append([]string{strconv.Itoa(*result)}, stack...)
+					stack = append([]string{fmt.Sprintf("%f", *result)}, stack...)
 				}
 			}
 		default:
